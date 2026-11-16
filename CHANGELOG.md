@@ -8,6 +8,10 @@ The changes a user of the plugin sees, per release. How to add one: CLAUDE.md.
 
 - Issue updates: with `tracker set tracker issue_updates=on`, the agent writes a linked ticket's status, its summary once it closes, and each decision settled on it to the ticket's issue with its own tool for the issue tracker, then records it with `tracker issue <id> --written`. `tracker issue` lists what is due, and the agent is asked right after the change, in the brief, and at your next message when a new update is due. Off by default.
 
+### Fixed
+
+- A ticket moved to a new branch no longer keeps the old branch's PR. Before, a ticket shipped in several PRs still showed its first merged PR, and so read as merged, after moving to the next branch. The old PR now stays in the log, and the next sync finds the new branch's PR.
+
 ## 0.31.1 - 2026-10-12
 
 ### Changed

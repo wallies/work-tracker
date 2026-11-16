@@ -1833,6 +1833,63 @@ class Spans(unittest.TestCase):
             self.assertEqual(len(fake.queries), 1)
             self.assertGreater(model.Tracker(model.HOME / s).raw_state()["last_sync"], before)
 
+    def test_a_new_branch_drops_the_pr_of_the_old_one(self):
+        # A ticket shipped as several PRs moves to its next branch: the merged PR stays with the old branch
+        s = slug()
+        t = ("--tracker", s)
+        run("init", s, "--title", "Slices", "--owner", "me", "--repo", "a/x")
+        run(*t, "new", "S-1", "--title", "In slices", "--branch", "f1")
+        run(*t, "set", "S-1", "status=in-progress")
+        prs = [pull(11, branch="f1", state="MERGED", merged_at="2026-10-01T06:30:00Z")]
+        with mock.patch.object(github, "gh", answers(prs)):
+            run(*t, "sync")
+
+        def lookup():
+            return model.Tracker(model.HOME / s).lookup("S-1")
+
+        self.assertEqual(lookup().stage, "merged")
+
+        run(*t, "set", "S-1", "branch=f1")  # the same branch: its PR stays
+        self.assertEqual(lookup().get("pr"), "11")
+
+        out = run(*t, "set", "S-1", "branch=f2")
+        self.assertNotIn("pr=", out)
+        ticket = lookup()
+        self.assertEqual(ticket.get("branch"), "f2")
+        for key in ("pr", "pr_state", "base", "merged_at"):
+            self.assertEqual(ticket.get(key), "", key)
+        self.assertEqual(ticket.stage, "in-progress")
+        self.assertIn("PR #11 (merged) stays with f1", run(*t, "history"))
+
+        prs.append(pull(12, branch="f2"))
+        with mock.patch.object(github, "gh", answers(prs)):
+            run(*t, "sync")
+        self.assertEqual((lookup().get("pr"), lookup().stage), ("12", "in-review"))
+
+    def test_a_branch_change_without_a_pr_logs_nothing(self):
+        s = slug()
+        t = ("--tracker", s)
+        run("init", s, "--title", "Slices", "--owner", "me", "--repo", "a/x")
+        run(*t, "new", "S-1", "--title", "No PR yet", "--branch", "f1")
+        run(*t, "set", "S-1", "branch=f2")
+        self.assertNotIn("stays with", run(*t, "history"))
+
+    def test_every_branch_move_drops_the_old_pr(self):
+        # `use`, the hooks and sync move a ticket through set_branch, not `set`
+        s = slug()
+        t = ("--tracker", s)
+        run("init", s, "--title", "Slices", "--owner", "me", "--repo", "a/x")
+        run(*t, "new", "S-1", "--title", "In slices", "--branch", "f1")
+        run(*t, "set", "S-1", "status=in-progress")
+        with mock.patch.object(github, "gh", answers([pull(11, branch="f1", state="MERGED",
+                                                           merged_at="2026-10-01T06:30:00Z")])):
+            run(*t, "sync")
+        tr = model.Tracker(model.HOME / s)
+        model.set_branch(tr, tr.lookup("S-1"), "f2", "was f1")
+        ticket = model.Tracker(model.HOME / s).lookup("S-1")
+        self.assertEqual((ticket.get("branch"), ticket.get("pr"), ticket.stage), ("f2", "", "in-progress"))
+        self.assertIn("S-1 is built on branch f2 (was f1); PR #11 (merged) stays with f1", run(*t, "history"))
+
     def test_the_span_lines(self):
         s = slug()
         run("init", s, "--title", "Timed", "--owner", "me")

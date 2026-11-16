@@ -18,7 +18,7 @@ from .model import (BLOCKER, DEFAULT_LABELS, EVIDENCE, EVIDENCE_DIR, HOME, ISSUE
     NO_STAGE, OPEN_STAGES, OWNER_HINT, ROOT, SAFE_NAME, SCALES, SCHEMA, STAGES, STATUSES, VIEWER_PORT, a_kind,
     all_trackers, append_log, append_notes, append_to_section, archived_at, archived_trackers, atomic_file,
     atomic_write, blocker_link, close_action, create, csv, dated, day_text, days_since, die, drop_from_section, fit,
-    id_kind, id_list, kind_names, link_url, load_record, locked, names, put_section, read_value, relabel,
+    id_kind, id_list, kind_names, left_pr, link_url, load_record, locked, names, put_section, read_value, relabel,
     replace_in_section, resolution, same_repo, sequence, set_branch, short, sort_key, stage_of, today, unblocked,
     unknown_dep, utc_now, Busy, Record, Tracker)
 from .system import spawn
@@ -201,7 +201,10 @@ def cmd_set(args):
         if k == "repo" and rec.kind == "ticket" and v and v not in tr.repos:
             die(f"repo must be one of the tracker's repos ({', '.join(tr.repos) or 'none'})")
         updates[k] = v
-    notes = []
+    notes, left = [], ""
+    if rec.kind == "ticket" and "branch" in updates:
+        drop, left = left_pr(tr, rec, updates["branch"])
+        updates.update(drop)
     to = stage_of("ticket", updates.get("status")) if rec.kind == "ticket" else NO_STAGE
     if to.closed and not (updates.get("summary") or rec.get("summary")):
         notes.append(f"set its summary: `tracker set {rec.id} summary=\"<what it delivered, or why dropped>\"`")
@@ -216,8 +219,11 @@ def cmd_set(args):
         tr.start_issue_updates()
     if moved:
         append_log(tr, status_line(rec), [] if rec.kind == "tracker" else [rec.id])
+    if left:
+        append_log(tr, f"{rec.id} is built on branch {updates['branch']}; {left}", [rec.id])
+        notes.append(left)
     print(f"{rec.id}: " + ", ".join(k if len(str(v)) > 40 else f"{k}={format_value(v)}"
-                                    for k, v in updates.items() if KEYS[rec.kind][k][0] != "auto"))
+                                    for k, v in updates.items() if KEYS[rec.kind][k][0] not in ("auto", "sync")))
     if starts:
         notes += base_notes(tr, rec)
     if notes:

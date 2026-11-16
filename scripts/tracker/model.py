@@ -150,7 +150,9 @@ KEYS = {
         "status": ("set", "the work status; once in-progress, the stage shown is this overlaid by the PR"),
         "group": ("set", "a free label that groups tickets in the views; not an order"),
         "branch": ("set", "the git branch the ticket is built on; finds the ticket and its PR. A branch holds any "
-                          "number of tickets. `set status=in-progress` records the current branch when empty"),
+                          "number of tickets. `set status=in-progress` records the current branch when empty. A "
+                          "new branch drops the old branch's PR, which stays in the log: a ticket shipped in "
+                          "several PRs moves to each next branch"),
         "repo": ("set", "owner/name of the ticket's repo, when the tracker spans several"),
         "depends_on": ("wait", "what the ticket waits on: ticket, decision, action or external ids; the only "
                                "record of order and blockers"),
@@ -203,6 +205,8 @@ KEYS = {
         "schema": ("auto", "the tracker's format version; `tracker migrate` brings an older one up to date"),
     },
 }
+# The ticket keys `sync` writes from the PR of the ticket's branch; a new branch drops them (`left_pr`)
+PR_KEYS = tuple(k for k, (owner, _) in KEYS["ticket"].items() if owner == "sync")
 SCHEMA = 3  # the tracker format this code writes; README `schema` names a tracker's (none: older than 1)
 # Keys an older format named otherwise, old: new; `migrate` renames them
 RENAMED_KEYS = {"ticket": {"updated": "updated_at", "issue_created": "issue_created_at"},
@@ -1734,11 +1738,24 @@ def append_notes(a: Record, notes: list[str]) -> None:
     a.rewrite(text + gap + "".join(f"- {' '.join(n.split())}\n" for n in notes))
 
 
+def left_pr(tr: Tracker, t: Record, branch: str) -> tuple[dict, str]:
+    """A ticket moving to `branch` leaves its PR with the old branch, as a ticket shipped in several PRs does: the
+    PR_KEYS to drop, and a log text naming the PR. ({}, "") when the branch stays or the ticket has no PR."""
+    old = t.get("branch")
+    if not t.get("pr") or branch == old:
+        return {}, ""
+    repo = t.get("repo") or (tr.repos[0] if tr.repos else "")
+    name = f"{repo}#{t.get('pr')}" if len(tr.repos) > 1 else f"#{t.get('pr')}"
+    return dict.fromkeys(PR_KEYS), f"PR {name} ({t.get('pr_state')}) stays with {old}"
+
+
 def set_branch(tr: Tracker, t: Record, branch: str, note: str = "") -> None:
     """Record the branch a ticket is built on, where sync finds its PR and every worktree finds the ticket; log it,
-    with `note` (how the branch was found)."""
-    t.change({"branch": branch})
-    append_log(tr, f"{t.id} is built on branch {branch}" + (f" ({note})" if note else ""), [t.id])
+    with `note` (how the branch was found) and the PR the old branch keeps."""
+    drop, left = left_pr(tr, t, branch)
+    t.change({"branch": branch, **drop})
+    text = f"{t.id} is built on branch {branch}" + (f" ({note})" if note else "")
+    append_log(tr, text + (f"; {left}" if left else ""), [t.id])
 
 
 def short(text: str, n: int = 90) -> str:
